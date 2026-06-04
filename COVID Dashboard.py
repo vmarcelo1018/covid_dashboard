@@ -14,14 +14,6 @@ ACCENT = "#E07A5F"    # terracotta
 st.set_page_config(page_title="COVID-19: A Pandemic of Inequalities",
                    layout="wide")
 
-
-def read_csv_flex(name):
-    """Read a CSV whether the file uses underscores or spaces in its name."""
-    alt = name.replace("_", " ")
-    path = name if os.path.exists(name) else alt
-    return pd.read_csv(path)
-
-
 # =========================================================== #
 # 1. DATA
 # =========================================================== #
