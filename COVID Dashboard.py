@@ -18,7 +18,7 @@ st.set_page_config(page_title="COVID-19: A Pandemic of Inequalities",
 # =========================================================== #
 
 # ---- Cases and deaths over time (monthly totals) ----
-daily_raw = pd.read_csv("WHO_COVID-19_Daily_Data.csv")
+daily_raw = pd.read_csv("WHO COVID-19 Daily Data.csv")
 daily_raw["Date_reported"] = pd.to_datetime(daily_raw["Date_reported"])
 daily = (
     daily_raw.groupby(pd.Grouper(key="Date_reported", freq="MS"))[["New_cases", "New_deaths"]]
@@ -27,7 +27,7 @@ daily = (
 )
 
 # ---- Deaths by age group and income level (each income column adds to ~100%) ----
-age_raw = pd.read_csv("WHO_COVID-19_Monthly_Deaths_by_Age.csv")
+age_raw = pd.read_csv("WHO COVID-19 Monthly Deaths by Age.csv")
 income_names = {"LIC": "Low", "LMC": "Lower-middle", "UMC": "Upper-middle", "HIC": "High"}
 age_names = {"0_4": "0-4", "5_14": "5-14", "15_64": "15-64", "65+": "65+"}
 age = (
@@ -39,7 +39,7 @@ age = age.rename(columns=income_names)[["Low", "Lower-middle", "Upper-middle", "
 age = age.reset_index().rename(columns={"Agegroup": "Age"})
 
 # ---- Vaccination coverage (at least one dose, per 100) by income level ----
-vax_raw = pd.read_csv("COVID_Vaccine_Uptake_2021-2023.csv")
+vax_raw = pd.read_csv("COVID Vaccine Uptake 2021-2023.csv")
 coverage = vax_raw.groupby("COUNTRY")["COVID_VACCINE_COV_TOT_A1D"].max()
 income_by_country = age_raw.drop_duplicates("Country_code").set_index("Country_code")["Wb_income"]
 vax = pd.DataFrame({"Coverage": coverage})
