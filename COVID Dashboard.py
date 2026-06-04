@@ -1,3 +1,5 @@
+
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -5,12 +7,19 @@ import plotly.express as px
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# --------
-PRIMARY = "#1B3A4B"   # dark slate blue (the main colour)
-ACCENT = "#E07A5F"    # terracotta (used to highlight the key point)
+#--------
+PRIMARY = "#1B3A4B"   # dark slate blue
+ACCENT = "#E07A5F"    # terracotta 
 
 st.set_page_config(page_title="COVID-19: A Pandemic of Inequalities",
                    layout="wide")
+
+
+def read_csv_flex(name):
+    """Read a CSV whether the file uses underscores or spaces in its name."""
+    alt = name.replace("_", " ")
+    path = name if os.path.exists(name) else alt
+    return pd.read_csv(path)
 
 
 # =========================================================== #
@@ -18,7 +27,7 @@ st.set_page_config(page_title="COVID-19: A Pandemic of Inequalities",
 # =========================================================== #
 
 # ---- Cases and deaths over time (monthly totals) ----
-daily_raw = pd.read_csv("WHO COVID-19 Daily Data.csv")
+daily_raw = read_csv_flex("WHO_COVID-19_Daily_Data.csv")
 daily_raw["Date_reported"] = pd.to_datetime(daily_raw["Date_reported"])
 daily = (
     daily_raw.groupby(pd.Grouper(key="Date_reported", freq="MS"))[["New_cases", "New_deaths"]]
@@ -26,20 +35,32 @@ daily = (
     .rename(columns={"Date_reported": "Date", "New_cases": "Cases", "New_deaths": "Deaths"})
 )
 
-# ---- Deaths by age group and income level (each income column adds to ~100%) ----
-age_raw = pd.read_csv("WHO COVID-19 Monthly Deaths by Age.csv")
+# ---- Deaths by age and income ----
+age_raw = read_csv_flex("WHO_COVID-19_Monthly_Deaths_by_Age.csv")
 income_names = {"LIC": "Low", "LMC": "Lower-middle", "UMC": "Upper-middle", "HIC": "High"}
 age_names = {"0_4": "0-4", "5_14": "5-14", "15_64": "15-64", "65+": "65+"}
-age = (
-    age_raw.pivot_table(index="Agegroup", columns="Wb_income", values="Deaths", aggfunc="sum")
-    .reindex(["0_4", "5_14", "15_64", "65+"]).fillna(0).rename(index=age_names)
-)
-age = (age / age.sum() * 100).round().astype(int)
-age = age.rename(columns=income_names)[["Low", "Lower-middle", "Upper-middle", "High"]]
-age = age.reset_index().rename(columns={"Agegroup": "Age"})
+order_age = ["0-4", "5-14", "15-64", "65+"]
+order_income = ["Low", "Lower-middle", "Upper-middle", "High"]
 
-# ---- Vaccination coverage (at least one dose, per 100) by income level ----
-vax_raw = pd.read_csv("COVID Vaccine Uptake 2021-2023.csv")
+# share of deaths by age group (overall)
+deaths_by_age = (age_raw.groupby("Agegroup")["Deaths"].sum()
+                 .reindex(["0_4", "5_14", "15_64", "65+"]).rename(index=age_names))
+age_share = (deaths_by_age / deaths_by_age.sum() * 100)
+
+# share of recorded deaths by income level
+deaths_by_income = (age_raw.groupby("Wb_income")["Deaths"].sum()
+                    .rename(index=income_names).reindex(order_income))
+income_share = (deaths_by_income / deaths_by_income.sum() * 100)
+
+# age x income table (for the heatmap)
+heat = (age_raw.pivot_table(index="Agegroup", columns="Wb_income", values="Deaths", aggfunc="sum")
+        .reindex(["0_4", "5_14", "15_64", "65+"]).fillna(0).rename(index=age_names))
+heat = (heat / heat.sum() * 100).round().astype(int)
+heat = heat.rename(columns=income_names)[order_income]
+heat.index.name = "Age"
+
+# ---- Vaccination coverage by income ----
+vax_raw = read_csv_flex("COVID_Vaccine_Uptake_2021-2023.csv")
 coverage = vax_raw.groupby("COUNTRY")["COVID_VACCINE_COV_TOT_A1D"].max()
 income_by_country = age_raw.drop_duplicates("Country_code").set_index("Country_code")["Wb_income"]
 vax = pd.DataFrame({"Coverage": coverage})
@@ -48,32 +69,39 @@ vax = vax.dropna(subset=["Coverage", "Income"]).reset_index(drop=True)
 
 
 # =========================================================== #
-# 2. SIDEBAR  (menu + filters)
+# 2. SIDEBAR
 # =========================================================== #
 st.sidebar.title("🦠 Pandemic of Inequalities")
-page = st.sidebar.radio("Go to:", [
+page = st.sidebar.radio("Read the story:", [
     "1. Introduction",
-    "2. Cases and deaths over time",
-    "3. Which ages died",
-    "4. Vaccines and income",
+    "2. The pandemic over time",
+    "3. Who it hit hardest",
+    "4. The vaccine divide",
 ])
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Filters")
-
-# Year filter (used on pages 1 and 2)
 years = daily["Date"].dt.year
 y_min, y_max = int(years.min()), int(years.max())
 year_range = st.sidebar.slider("Year range", y_min, y_max, (y_min, y_max))
-
-# Income filter (used on pages 3 and 4)
-all_income = ["Low", "Lower-middle", "Upper-middle", "High"]
-chosen_income = st.sidebar.multiselect("Income groups", all_income, default=all_income)
-if not chosen_income:                       # never let it be empty
-    chosen_income = all_income
-
-# Apply the year filter once
 daily_f = daily[(years >= year_range[0]) & (years <= year_range[1])]
+
+
+# small helper for the lollipop charts (used on page 3)
+def lollipop(series, highlight, xlabel):
+    fig, ax = plt.subplots(figsize=(8, 4))
+    for i, (label, value) in enumerate(series.items()):
+        col = ACCENT if label == highlight else PRIMARY
+        ax.hlines(i, 0, value, color=col, alpha=0.5, linewidth=2.5)
+        ax.plot(value, i, "o", color=col, markersize=12)
+        label_txt = f"{value:.0f}%" if value >= 1 else f"{value:.1f}%"
+        ax.text(value + series.max() * 0.02, i, label_txt, va="center")
+    ax.set_yticks(range(len(series)))
+    ax.set_yticklabels(series.index)
+    ax.set_xlabel(xlabel)
+    ax.set_xlim(0, series.max() * 1.18)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.grid(axis="y", visible=False)
+    return fig
 
 
 # =========================================================== #
@@ -84,17 +112,19 @@ daily_f = daily[(years >= year_range[0]) & (years <= year_range[1])]
 if page.startswith("1"):
     st.title("COVID-19: A Pandemic of Inequalities")
     st.write(
-        "The pandemic hit everyone, but not equally. This dashboard looks "
-        "at two kinds of inequality: **age** and **income**. Use the filters "
-        "in the sidebar to explore the numbers."
+        "COVID-19 was a global pandemic, but the burden was never shared "
+        "equally. This is a short data story about **who died** and **who "
+        "got protected** — and the gap between them."
     )
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total cases", f"{daily_f['Cases'].sum() / 1e6:.0f} M")
-    c2.metric("Total deaths", f"{daily_f['Deaths'].sum() / 1e6:.1f} M")
+    c1.metric("Reported cases", f"{daily_f['Cases'].sum() / 1e6:.0f} M")
+    c2.metric("Reported deaths", f"{daily_f['Deaths'].sum() / 1e6:.1f} M")
     c3.metric("Years shown", f"{year_range[0]}–{year_range[1]}")
+    st.info("Turn the page in the sidebar to follow the story. The vaccine "
+            "divide at the end is the part worth sitting with.")
 
 
-# ---- Page 2: Cases and deaths over time (Plotly) ----
+# ---- Page 2: The pandemic over time (Plotly) ----
 elif page.startswith("2"):
     st.subheader("Two Curves, One Pandemic")
     measure = st.radio("Choose a measure:", ["Cases", "Deaths"], horizontal=True)
@@ -104,56 +134,76 @@ elif page.startswith("2"):
     fig = px.line(daily_f, x="Date", y=measure)
     fig.update_traces(line_color=color)
     st.plotly_chart(fig, use_container_width=True)
+    st.write("The virus arrived in waves — each one a fresh surge of illness "
+             "and loss before the next began.")
 
-    with st.expander("See the monthly numbers"):
-        st.dataframe(daily_f, use_container_width=True)
 
-
-# ---- Page 3: Which ages died (Matplotlib + Seaborn) ----
+# ---- Page 3: Who it hit hardest (Matplotlib + Seaborn) ----
 elif page.startswith("3"):
-    st.subheader("The Pandemic Aged Upward")
-    st.caption("Average share of deaths by age group, for the chosen income groups")
+    st.subheader("Who the Pandemic Hit Hardest")
+    lens = st.radio("Look at the deaths by:", ["Age", "Income"], horizontal=True)
 
-    avg = age.set_index("Age")[chosen_income].mean(axis=1)
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(avg.index, avg.values, color=PRIMARY, marker="o", linewidth=2)
-    ax.plot(avg.index[2:], avg.values[2:], color=ACCENT, marker="o", linewidth=2)
-    ax.set_ylabel("Share of deaths (%)")
-    st.pyplot(fig)
-    st.write("Most deaths were in people **65 and older** (orange).")
+    if lens == "Age":
+        st.caption("Share of recorded deaths by age group")
+        st.pyplot(lollipop(age_share, "65+", "Share of deaths (%)"))
+        st.write(
+            f"The pandemic fell hardest on the old: people **65 and older** "
+            f"(orange) account for about **{age_share['65+']:.0f}%** of "
+            "recorded deaths."
+        )
+    else:
+        st.caption("Share of recorded deaths by country income level")
+        st.pyplot(lollipop(income_share, "Low", "Share of deaths (%)"))
+        low_txt = "less than 1%" if income_share["Low"] < 1 else f"{income_share['Low']:.0f}%"
+        st.write(
+            f"Low-income countries (orange) account for only "
+            f"**{low_txt}** of recorded deaths — not because fewer people "
+            "died there, but because deaths are far harder to count where "
+            "health systems are stretched. The real toll is almost certainly "
+            "higher than the records show."
+        )
 
     st.subheader("Where Age Meets Income")
     st.caption("Share of each income group's deaths, by age")
-    heat = age.set_index("Age")[chosen_income]
     fig2, ax2 = plt.subplots(figsize=(8, 4))
     sns.heatmap(heat, annot=True, fmt="d",
                 cmap=sns.light_palette(PRIMARY, as_cmap=True), ax=ax2)
+    ax2.set_xlabel("")
     st.pyplot(fig2)
 
 
-# ---- Page 4: Vaccines and income (Seaborn) ----
+# ---- Page 4: The vaccine divide (Seaborn) ----
 elif page.startswith("4"):
     st.subheader("The Vaccine Divide")
-    st.caption("Vaccination coverage by income level")
+    st.caption("Almost everyone in wealthy countries got a shot. The poorest "
+               "were left behind.")
 
-    order = [g for g in all_income if g in chosen_income]
-    vax_f = vax[vax["Income"].isin(order)]
-    colors = {x: (ACCENT if x == "Low" else PRIMARY) for x in order}
+    med = vax.groupby("Income")["Coverage"].median()
+    gap = med["High"] - med["Low"]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Low-income (median)", f"{med['Low']:.0f} / 100")
+    c2.metric("High-income (median)", f"{med['High']:.0f} / 100")
+    c3.metric("The gap", f"{gap:.0f} points")
+
+    st.markdown("**Set a vaccination target and see who reached it:**")
+    target = st.slider("Doses per 100 people", 0, 100, 70)
 
     fig, ax = plt.subplots(figsize=(8, 4))
-    sns.boxplot(data=vax_f, x="Income", y="Coverage", order=order,
-                hue="Income", palette=colors, legend=False, ax=ax)
+    sns.stripplot(data=vax, x="Income", y="Coverage", order=order_income,
+                  color=PRIMARY, alpha=0.6, jitter=0.2, size=6, ax=ax)
+    ax.axhline(target, color=ACCENT, linestyle="--", linewidth=2)
+    ax.text(3.4, target + 1.5, f"target: {target}", color=ACCENT, ha="right")
     ax.set_ylabel("Fully vaccinated per 100 people")
+    ax.set_xlabel("")
+    ax.set_ylim(0, 100)
     st.pyplot(fig)
 
-    with st.expander("See the median coverage per group"):
-        st.dataframe(
-            vax_f.groupby("Income")["Coverage"].median().reindex(order).round(1),
-            use_container_width=True,
-        )
-
+    reached = vax[vax["Coverage"] >= target].groupby("Income").size()
+    totals = vax.groupby("Income").size()
+    lr, lt = int(reached.get("Low", 0)), int(totals.get("Low", 0))
+    hr, ht = int(reached.get("High", 0)), int(totals.get("High", 0))
     st.write(
-        "**Conclusion.** To prepare for the next pandemic: protect the "
-        "elderly, share vaccines more fairly, and help low-income countries "
-        "count deaths better."
+        f"At a target of **{target} doses per 100 people**, only "
+        f"**{lr} of {lt}** low-income countries reached it — compared with "
+        f"**{hr} of {ht}** high-income countries."
     )
