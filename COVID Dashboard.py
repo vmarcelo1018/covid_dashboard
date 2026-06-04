@@ -120,8 +120,7 @@ if page.startswith("1"):
     c1.metric("Reported cases", f"{daily_f['Cases'].sum() / 1e6:.0f} M")
     c2.metric("Reported deaths", f"{daily_f['Deaths'].sum() / 1e6:.1f} M")
     c3.metric("Years shown", f"{year_range[0]}–{year_range[1]}")
-    st.info("Turn the page in the sidebar to follow the story. The vaccine "
-            "divide at the end is the part worth sitting with.")
+
 
 
 # ---- Page 2: The pandemic over time (Plotly) ----
